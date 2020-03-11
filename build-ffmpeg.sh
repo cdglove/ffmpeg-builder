@@ -54,7 +54,7 @@ update_svn_repo() {
 
   if [ ! -d $dest_dir ]; then
     log_info "svn checkout from $repo_dir to $dest_dir"
-    rem -Rf "$dest_dir.tmp"
+    rm -Rf "$dest_dir.tmp"
     if ! svn checkout $revision_string $repo_url "$dest_dir"; then
       log_error "Failed to svn checkout $repo_url"
       exit 1
