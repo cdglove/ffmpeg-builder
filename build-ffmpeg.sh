@@ -1,17 +1,6 @@
 #!/bin/bash
 # Based on ideas from https://github.com/rdp/ffmpeg-windows-build-helpers but
 # significantly cleaner and smaller to suit my needs.
-
-declare -a g_ffmpeg_config_opts
-g_prefix_path=
-g_src_path=
-g_toolchain=
-g_toolchain_env=
-g_cpu_count=0
-# flags=(--foo --bar='baz')
-# flags+=(--greeting="Hello ${name}")
-# mybinary "${flags[@]}"
-
 log_error() {
   echo -e "\e[91m${1}\e[39m"
   exit -1
@@ -42,7 +31,7 @@ git_hard_reset() {
 }
 
 update_svn_repo() {
-  pushd "$g_src_path"
+  pushd "$src_path"
   declare -r repo_url="$1"
   declare -r dest_dir="$2"
   declare -r revision="$3"
@@ -65,7 +54,7 @@ update_svn_repo() {
 }
 
 update_git_repo() {
-  pushd "$g_src_path"
+  pushd "$src_path"
   declare -r repo_url="$1"
   declare -r dest_dir="$2"
   local checkout_name="$3"
@@ -110,38 +99,40 @@ update_git_repo() {
   popd
 }
 
-get_cpu_count() {
-  local cpu_count="$(grep -c processor /proc/cpuinfo 2>/dev/null)" # linux cpu count
-  if [ -z "$cpu_count" ]; then
-    cpu_count=`sysctl -n hw.ncpu | tr -d '\n'` # OS X cpu count
-    if [ -z "$cpu_count" ]; then
-      echo "warning, unable to determine cpu count, defaulting to 1"
-      cpu_count=1 # else default to just 1, instead of blank, which means infinite
+set_cpu_count() {
+  local processor_count="$(grep -c processor /proc/cpuinfo 2>/dev/null)"
+  if [ -z "$processor_count" ]; then
+    processor_count=`sysctl -n hw.ncpu | tr -d '\n'` # OS X cpu count
+    if [ -z "$processor_count" ]; then
+      log_info "warning, unable to determine cpu count, defaulting to 1"
+      processor_count=1 # else default to just 1, instead of blank, which means infinite
     fi
   fi
 
-  g_cpu_count=$cpu_count
+  cpu_count=$processor_count
 }
 
 get_parameter_hash() {
-  hash=$(echo "$@" | md5sum | cut -f1 -d" ")
+  all_args="$(printenv) $@"
+  hash=$(echo "$all_args" | md5sum | cut -f1 -d" ")
   echo "$1_$hash"
 }
 
 set_enviornment() {
-  export CC=${g_toolchain}-gcc
-  export AR=${g_toolchain}-ar 
-  export RANLIB=${g_toolchain}-ranlib 
-  export LD=${g_toolchain}-ld 
-  export STRIP=${g_toolchain}-strip 
-  export CXX=${g_toolchain}-g++
-  export CFLAGS="-I$g_prefix_path/include"
-  export CXXFLAGS="-I$g_prefix_path/include"
-  export LDFLAGS="-L$g_prefix_path/lib"
+  export CC=${toolchain}-gcc
+  export AR=${toolchain}-ar 
+  export RANLIB=${toolchain}-ranlib 
+  export LD=${toolchain}-ld 
+  export STRIP=${toolchain}-strip 
+  export CXX=${toolchain}-g++
+  export CFLAGS="-I${prefix_path}/include"
+  export CXXFLAGS="-I${prefix_path}/include"
+  export LDFLAGS="-L${prefix_path}/lib -pthread"
+  export PKG_CONFIG_PATH="${prefix_path}/lib/pkgconfig"
 }
 
 make_install() {
-  if ! make -j$g_cpu_count; then
+  if ! make -j$cpu_count; then
     log_error "Function \"${FUNCNAME[1]}\" failed to make."
   fi
 
@@ -152,7 +143,7 @@ make_install() {
 
 update_configure() {
   configure_hash=$(get_parameter_hash "configure" "$@")
-  if [ ! -f "$configure_hash" ]; then    
+  if [ ! -f "$configure_hash" ]; then   
     if ! ./configure "$@"; then
       log_error "Function \"${FUNCNAME[1]}\" failed to configure"
     fi
@@ -171,9 +162,9 @@ update_autoreconf() {
 build_lame() {
   update_svn_repo https://svn.code.sf.net/p/lame/svn/trunk/lame lame RELEASE__3_100
   pushd lame
-  update_configure --prefix="$g_prefix_path" --host=$host_target --enable-nasm --disable-shared
+  update_configure --prefix="$prefix_path" --host=$host_target --enable-nasm --disable-shared
   make_install
-  g_ffmpeg_config_opts+=(--enable-libmp3lame)
+  ffmpeg_config_opts+=(--enable-libmp3lame)
   popd 
 }
 
@@ -181,75 +172,102 @@ build_fdk_aac() {
   update_git_repo https://github.com/mstorsjo/fdk-aac.git fdk-aac
   pushd fdk-aac
   update_autoreconf
-  update_configure --prefix="$g_prefix_path" --host=$host_target --disable-shared
+  update_configure --prefix="$prefix_path" --host=$host_target --disable-shared
   make_install
-  g_ffmpeg_config_opts+=(--enable-libfdk_aac)
+  ffmpeg_config_opts+=(--enable-libfdk_aac)
   popd 
+}
+
+build_opus() {
+  update_git_repo https://git.xiph.org/opus.git opus
+  pushd opus
+  update_autoreconf
+  update_configure --prefix="$prefix_path" --host=$host_target --disable-doc --disable-extra-programs --disable-stack-protector --disable-shared
+  make_install
+  ffmpeg_config_opts+=(--enable-libopus)
+  popd
 }
 
 build_x264() {
   update_git_repo "https://code.videolan.org/videolan/x264.git" "x264" "origin/stable"
   pushd x264
-  update_configure --prefix="$g_prefix_path" --host=$host_target --enable-static --disable-cli
+  update_configure --prefix="$prefix_path" --host=$host_target --enable-static --disable-cli
   make_install
-  g_ffmpeg_config_opts+=(--enable-libx264)
+  ffmpeg_config_opts+=(--enable-libx264)
+  popd
+}
+
+build_vpx() {
+  update_git_repo https://chromium.googlesource.com/webm/libvpx.git vpx
+  pushd vpx
+  local vpx_host_target=
+  if [[ $host_target == "x86_64-w64-mingw32" ]]; then
+    vpx_host_target="x86_64-win64-gcc"
+  fi
+  update_configure --prefix="$prefix_path" --target=$vpx_host_target --enable-static --disable-shared --disable-examples --disable-tools --disable-docs --disable-unit-tests --enable-vp9-highbitdepth 
+  make_install
+  ffmpeg_config_opts+=(--enable-libvpx)
   popd
 }
 
 build_dependencies() {
-  pushd $g_src_path
+  pushd $src_path
   build_lame
   build_fdk_aac
+  build_opus
   build_x264
+  build_vpx
   popd
 }
 
 build_ffmpeg() {
-  pushd "$g_src_path"
+  pushd "$src_path"
   update_git_repo "https://github.com/FFmpeg/FFmpeg.git" ffmpeg
   pushd ffmpeg
-  g_ffmpeg_config_opts+=(--arch=x86_64)
-  g_ffmpeg_config_opts+=(--target-os=mingw32)
-  g_ffmpeg_config_opts+=(--cross-prefix=$g_toolchain-)
-  g_ffmpeg_config_opts+=(--enable-cross-compile)
-  g_ffmpeg_config_opts+=(--prefix=$g_prefix_path)
-  g_ffmpeg_config_opts+=(--enable-static)
-  g_ffmpeg_config_opts+=(--enable-nonfree)
-  g_ffmpeg_config_opts+=(--enable-gpl)
-  update_configure "${g_ffmpeg_config_opts[@]}"
-  make -j$g_cpu_count
+  ffmpeg_config_opts+=(--arch=x86_64)
+  ffmpeg_config_opts+=(--target-os=mingw32)
+  ffmpeg_config_opts+=(--cross-prefix=$toolchain-)
+  ffmpeg_config_opts+=(--enable-cross-compile)
+  ffmpeg_config_opts+=(--prefix=$prefix_path)
+  ffmpeg_config_opts+=(--enable-static)
+  ffmpeg_config_opts+=(--enable-nonfree)
+  ffmpeg_config_opts+=(--enable-gpl)
+  update_configure "${ffmpeg_config_opts[@]}"
+  #make -j$cpu_count
   popd
   popd
 }
 
 main() {
-  local current_dir=$(pwd)
-  local host_target='x86_64-w64-mingw32'
-  mkdir -p $current_dir/_target/$host_target/prefix
-  mkdir -p $current_dir/_target/$host_target/src
-  g_prefix_path="$(realpath $current_dir/_target/$host_target/prefix)/"
-  g_src_path="$(realpath $current_dir/_target/$host_target/src)/"
-  g_toolchain="x86_64-w64-mingw32"
-  g_toolchain_env="CC=${g_toolchain}-gcc \
-                   AR=${g_toolchain}-ar \
-                   RANLIB=${g_toolchain}-ranlib \
-                   LD=${g_toolchain}-ld \
-                   STRIP=${g_toolchain}-strip \
-                   CXX=${g_toolchain}-g++ \
-                   CFLAGS=\"-I$g_prefix_path/include\" \
-                   CXXFLAGS=\"-I$g_prefix_path/include\" \
-                   LDFLAGS=\"-L$g_prefix_path/lib\""
-  get_cpu_count
+  declare -r root_dir=$(pwd)
+  declare -r host_target='x86_64-w64-mingw32'
+  declare -r host_target_alt='x86_64-win64-gcc'
+  mkdir -p $root_dir/_target/$host_target/prefix
+  mkdir -p $root_dir/_target/$host_target/src
+  declare -r prefix_path="$(realpath $root_dir/_target/$host_target/prefix)"
+  declare -r src_path="$(realpath $root_dir/_target/$host_target/src)"
+  declare -r toolchain="x86_64-w64-mingw32"
+  declare -r toolchain_env="CC=${toolchain}-gcc \
+                   AR=${toolchain}-ar \
+                   RANLIB=${toolchain}-ranlib \
+                   LD=${toolchain}-ld \
+                   STRIP=${toolchain}-strip \
+                   CXX=${toolchain}-g++ \
+                   CFLAGS=\"-I${prefix_path}/include\" \
+                   CXXFLAGS=\"-I${prefix_path}/include\" \
+                   LDFLAGS=\"-L${prefix_path}/lib\" \
+                   PKG_CONFIG_PATH=\"${prefix_path}/lib/pkgconfig\""
+  set_cpu_count
   set_enviornment
   log_info "configuration: "
-  log_info "prefix_path=$g_prefix_path"
-  log_info "src_path=$g_src_path"
+  log_info "prefix_path=$prefix_path"
+  log_info "src_path=$src_path"
   log_info "host_target=$host_target"
-  log_info "toolchain=$g_toolchain"
-  log_info "toolchain_env=$g_toolchain_env"
-  log_info "cpu_count=$g_cpu_count"
-  build_dependencies
-  build_ffmpeg
+  log_info "toolchain=$toolchain"
+  log_info "toolchain_env=$toolchain_env"
+  log_info "cpu_count=$cpu_count"
+  #build_dependencies
+  #build_ffmpeg
 }
 
 main "$@"
