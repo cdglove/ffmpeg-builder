@@ -1,6 +1,11 @@
 #!/bin/bash
 # Based on ideas from https://github.com/rdp/ffmpeg-windows-build-helpers but
 # significantly cleaner and smaller to suit my needs.
+
+colour_fg_norm="\e[39m"
+colour_red="\e[39m"
+colour_green="\e[32m"
+
 logfile=build-ffmpeg.log
 echo "" > $logfile
 log() {
@@ -12,8 +17,15 @@ info() {
   log "$@"
 }
 
+infoc() {
+  clolour=$1
+  shift
+  echo -e "${colour}$@${colour_fg_norm}"
+  log "$@"
+}
+
 die() {
-  echo -e "\e[91m$@\e[39m"
+  echo -e "${colour_red}$@${colour_fg_norm}"
   exit 1
 }
 
@@ -226,7 +238,16 @@ build_vpx() {
   if [[ $host_target == "x86_64-w64-mingw32" ]]; then
     vpx_host_target="x86_64-win64-gcc"
   fi
-  update_configure --prefix="$prefix_path" --target=$vpx_host_target --enable-static --disable-shared --disable-examples --disable-tools --disable-docs --disable-unit-tests --enable-vp9-highbitdepth 
+  update_configure \
+    --prefix="$prefix_path" \
+    --target=$vpx_host_target \
+    --enable-static \
+    --disable-shared \
+    --disable-examples \
+    --disable-tools \
+    --disable-docs \
+    --disable-unit-tests \
+    --enable-vp9-highbitdepth 
   make_install
   ffmpeg_config_opts+=(--enable-libvpx)
   popd_s
@@ -260,6 +281,8 @@ build_ffmpeg() {
   make_install
   popd_s
   popd_s
+  infoc "${colour_green}" "Success."
+  info "You can find the ffmpeg executable in ${prefix_path}/bin"
 }
 
 main() {
@@ -285,7 +308,8 @@ main() {
   declare -r toolchain_env="$text"
   set_cpu_count
   set_enviornment
-  info "configuration: "
+  info "Configuration: "
+  info "-----------------------------------------------------------------------"
   info "prefix_path=$prefix_path"
   info "src_path=$src_path"
   info "host_target=$host_target"
