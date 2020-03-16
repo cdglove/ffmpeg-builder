@@ -186,14 +186,30 @@ make_install() {
   fi
 }
 
-update_configure() {
-  configure_hash=$(get_parameter_hash "configure" "$@")
-  if [ ! -f "$configure_hash" ]; then   
-    if ! call ./configure "$@"; then
+update_command() {
+  local hash_name=$1
+  shift
+  file=$(get_parameter_hash "$hash_name" "$@")
+  if [ ! -f "$file" ]; then   
+    if ! call $@; then
       die "Function \"${FUNCNAME[1]}\" failed to configure"
     fi
-    touch -- "$configure_hash"
+    touch -- "$file"
   fi
+}
+
+update_configure() {
+  update_command "configure" ./configure $@
+}
+
+update_cmake() {
+  local build_dir=$1
+  local cur_dir=$(pwd)
+  shift
+  mkdir -p "$build_dir"
+  pushd "$build_dir"
+  update_command "cmake" cmake "$cur_dir" $@
+  popd
 }
 
 update_autoreconf() {
@@ -285,6 +301,17 @@ build_vpx() {
   popd_s
 }
 
+build_aomav1() {
+  info "${FUNCNAME[O]}" 
+  update_git_repo https://aomedia.googlesource.com/aom aom
+  pushd_s aom
+  update_cmake "../aom_build" -DCMAKE_INSTALL_PREFIX="$prefix_path" -DENABLE_DOCS=0 -DENABLE_TESTS=0 -DCONFIG_RUNTIME_CPU_DETECT=0 -DAOM_TARGET_CPU=generic -DCMAKE_BUILD_STATIC_LIBS=ON
+  pushd "../aom_build"
+  make_install
+  ffmpeg_config_opts+=(--enable-libaom)
+  popd
+}
+
 build_dependencies() {
   pushd_s "$src_path"
   build_lame
@@ -292,6 +319,7 @@ build_dependencies() {
   build_opus
   build_x264
   build_vpx
+  build_aomav1
   popd_s
 }
 
