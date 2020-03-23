@@ -236,6 +236,15 @@ is_cross() {
   fi
 }
 
+build_zlib() {
+  info "${FUNCNAME[O]}"
+  update_git_repo https://github.com/madler/zlib.git zlib v1.2.11
+  pushd_s zlib
+  update_configure --prefix="$prefix_path" --64 --static
+  make_install
+  popd_s
+}
+
 build_lame() {
   info "${FUNCNAME[O]}"
   update_svn_repo https://svn.code.sf.net/p/lame/svn/trunk/lame lame RELEASE__3_100
@@ -314,6 +323,7 @@ build_aomav1() {
 
 build_dependencies() {
   pushd_s "$src_path"
+  build_zlib
   build_lame
   build_fdk_aac
   build_opus
