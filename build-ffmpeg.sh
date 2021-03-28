@@ -74,8 +74,8 @@ update_svn_repo() {
   declare -r revision="$3"
   required_parameters repo_url dest_dir
 
-  if [[ -z $revision ]]; then
-    revision_string="-r$revision"
+  if [[ ! -z $revision ]]; then
+    revision_string="--revision=$revision"
   fi
 
   info "svn checkout from $repo_url to $dest_dir"
@@ -247,7 +247,7 @@ build_zlib() {
 
 build_lame() {
   info "${FUNCNAME[O]}"
-  update_svn_repo https://svn.code.sf.net/p/lame/svn/trunk/lame lame RELEASE__3_100
+  update_svn_repo https://svn.code.sf.net/p/lame/svn/trunk/lame lame 6403
   pushd_s lame
   update_configure --prefix="$prefix_path" --host=$host --enable-nasm --disable-shared
   make_install
@@ -268,7 +268,7 @@ build_fdk_aac() {
 
 build_opus() {
   info "${FUNCNAME[O]}"
-  update_git_repo https://git.xiph.org/opus.git opus
+  update_git_repo https://github.com/xiph/opus.git opus
   pushd_s opus
   update_autoreconf
   update_configure --prefix="$prefix_path" --host=$host --disable-doc --disable-extra-programs --disable-stack-protector --disable-shared
@@ -397,7 +397,7 @@ main() {
   readonly debug=$cl_debug
 
   if is_debug; then
-    set -x
+    set -ex
   fi
 
   if [[ "$cl_target_os" = "mingw32" ]]; then
