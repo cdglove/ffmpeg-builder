@@ -2,9 +2,9 @@
 # Based on ideas from https://github.com/rdp/ffmpeg-windows-build-helpers but
 # significantly cleaner and smaller to suit my needs.
 
-readonly colour_fg_norm="\e[39m"
-readonly colour_red="\e[39m"
-readonly colour_green="\e[32m"
+readonly colour_fg_norm="\033[39m"
+readonly colour_red="\033[39m"
+readonly colour_green="\033[32m"
 readonly logfile=$(realpath build-ffmpeg.log)
 
 echo "" > $logfile
@@ -17,41 +17,14 @@ info() {
   log "$@"
 }
 
-infoc() {
-  colour=$1
-  shift
-  echo -e "${colour}$@${colour_fg_norm}"
-  log "$@"
-}
-
 die() {
   echo -e "${colour_red}$@${colour_fg_norm}"
   exit 1
 }
 
 call() {
-  echo "$@"
-  if is_debug; then
-    "$@"
-  else
-    "$@" >/dev/null 2>&1
-  fi
-}
-
-pushd_s() {
-  if is_debug; then
-    pushd "$1" || die "Failed to push $1"
-  else
-    pushd "$1" >/dev/null 2>&1
-  fi
-}
-
-popd_s() {
-  if is_debug; then
-    popd || die "Failed to pop $1"
-  else
-    popd >/dev/null 2>&1
-  fi
+  info "$@"
+  $@ >> "$logfile" 2>&1
 }
 
 required_parameters() {
@@ -68,14 +41,14 @@ git_hard_reset() {
 }
 
 update_svn_repo() {
-  pushd_s "$src_path"
-  declare -r repo_url="$1"
-  declare -r dest_dir="$2"
-  declare -r revision="$3"
+  pushd "$src_path"
+  local -r repo_url="$1"
+  local -r dest_dir="$2"
+  local -r revision="$3"
   required_parameters repo_url dest_dir
 
   if [[ ! -z $revision ]]; then
-    revision_string="--revision=$revision"
+    revision_string="-r $revision"
   fi
 
   info "svn checkout from $repo_url to $dest_dir"
@@ -92,13 +65,13 @@ update_svn_repo() {
       exit 1
     fi
   fi
-  popd_s
+  popd
 }
 
 update_git_repo() {
-  pushd_s "$src_path"
-  declare -r repo_url="$1"
-  declare -r dest_dir="$2"
+  pushd "$src_path"
+  local -r repo_url="$1"
+  local -r dest_dir="$2"
   local checkout_name="$3"
   required_parameters repo_url dest_dir
 
@@ -138,7 +111,7 @@ update_git_repo() {
   else
     log "fetched no code changes, not forcing reconfigure for that..."
   fi
-  popd_s
+  popd
 }
 
 set_cpu_count() {
@@ -186,13 +159,24 @@ make_install() {
   fi
 }
 
+ninja_install() {
+  info "${FUNCNAME[O]}"
+  if ! call ninja; then
+    die "Function \"${FUNCNAME[1]}\" failed to make."
+  fi
+
+  if ! call ninja install; then
+    die "Function \"${FUNCNAME[1]}\" failed to make install"
+  fi
+}
+
 update_command() {
-  local hash_name=$1
+  local -r hash_name=$1
   shift
   file=$(get_parameter_hash "$hash_name" "$@")
   if [ ! -f "$file" ]; then   
     if ! call $@; then
-      die "Function \"${FUNCNAME[1]}\" failed to configure"
+      die "Function \"${FUNCNAME[1]}\" failed to configure (PWD=$PWD)"
     fi
     touch -- "$file"
   fi
@@ -203,12 +187,12 @@ update_configure() {
 }
 
 update_cmake() {
-  local build_dir=$1
-  local cur_dir=$(pwd)
+  local -r build_dir=$1
+  local -r cur_dir=$(pwd)
   shift
   mkdir -p "$build_dir"
   pushd "$build_dir"
-  update_command "cmake" cmake "$cur_dir" $@
+  update_command "cmake" cmake "$cur_dir" $@ $cmake_system_arg -DCMAKE_INSTALL_PREFIX="$prefix_path"
   popd
 }
 
@@ -239,58 +223,60 @@ is_cross() {
 build_zlib() {
   info "${FUNCNAME[O]}"
   update_git_repo https://github.com/madler/zlib.git zlib v1.2.11
-  pushd_s zlib
-  update_configure --prefix="$prefix_path" --64 --static
-  make_install
-  popd_s
+  pushd zlib
+  update_cmake "../zlib_build" -G Ninja
+  pushd "../zlib_build"
+  ninja_install
+  popd
+  popd
 }
 
 build_lame() {
   info "${FUNCNAME[O]}"
-  update_svn_repo https://svn.code.sf.net/p/lame/svn/trunk/lame lame 6403
-  pushd_s lame
-  update_configure --prefix="$prefix_path" --host=$host --enable-nasm --disable-shared
+  update_svn_repo https://svn.code.sf.net/p/lame/svn/trunk/lame lame 6487
+  pushd lame
+  update_configure --prefix="$prefix_path" $host_arg --enable-nasm --disable-shared --disable-decoder
   make_install
   ffmpeg_config_opts+=(--enable-libmp3lame)
-  popd_s 
+  popd 
 }
 
 build_fdk_aac() {
   info "${FUNCNAME[O]}"
-  update_git_repo https://github.com/mstorsjo/fdk-aac.git fdk-aac
-  pushd_s fdk-aac
+  update_git_repo https://github.com/mstorsjo/fdk-aac.git fdk-aac v2.0.1
+  pushd fdk-aac
   update_autoreconf
-  update_configure --prefix="$prefix_path" --host=$host --disable-shared
+  update_configure --prefix="$prefix_path" $host_arg --disable-shared
   make_install
   ffmpeg_config_opts+=(--enable-libfdk_aac)
-  popd_s 
+  popd 
 }
 
 build_opus() {
   info "${FUNCNAME[O]}"
   update_git_repo https://github.com/xiph/opus.git opus
-  pushd_s opus
+  pushd opus
   update_autoreconf
-  update_configure --prefix="$prefix_path" --host=$host --disable-doc --disable-extra-programs --disable-stack-protector --disable-shared
+  update_configure --prefix="$prefix_path" $host_arg --disable-doc --disable-extra-programs --disable-stack-protector --disable-shared
   make_install
   ffmpeg_config_opts+=(--enable-libopus)
-  popd_s
+  popd
 }
 
 build_x264() {
   info "${FUNCNAME[O]}"
   update_git_repo "https://code.videolan.org/videolan/x264.git" "x264" "origin/stable"
-  pushd_s x264
-  update_configure --prefix="$prefix_path" --host=$host --enable-static --disable-cli
+  pushd x264
+  update_configure --prefix="$prefix_path" $host_arg --enable-static --disable-cli --disable-opencl
   make_install
   ffmpeg_config_opts+=(--enable-libx264)
-  popd_s
+  popd
 }
 
 build_vpx() {
   info "${FUNCNAME[O]}"
   update_git_repo https://chromium.googlesource.com/webm/libvpx.git vpx
-  pushd_s vpx
+  pushd vpx
   local vpx_host=
   if [[ $host == "x86_64-w64-mingw32" ]]; then
     vpx_host="x86_64-win64-gcc"
@@ -307,14 +293,14 @@ build_vpx() {
     --enable-vp9-highbitdepth 
   make_install
   ffmpeg_config_opts+=(--enable-libvpx)
-  popd_s
+  popd
 }
 
 build_aomav1() {
   info "${FUNCNAME[O]}" 
   update_git_repo https://aomedia.googlesource.com/aom aom
-  pushd_s aom
-  update_cmake "../aom_build" -DCMAKE_INSTALL_PREFIX="$prefix_path" -DENABLE_DOCS=0 -DENABLE_TESTS=0 -DCONFIG_RUNTIME_CPU_DETECT=0 -DAOM_TARGET_CPU=generic -DCMAKE_BUILD_STATIC_LIBS=ON
+  pushd aom
+  update_cmake "../aom_build" -DENABLE_DOCS=0 -DENABLE_TESTS=0 -DCONFIG_RUNTIME_CPU_DETECT=0 -DAOM_TARGET_CPU=generic -DCMAKE_BUILD_STATIC_LIBS=ON
   pushd "../aom_build"
   make_install
   ffmpeg_config_opts+=(--enable-libaom)
@@ -322,25 +308,25 @@ build_aomav1() {
 }
 
 build_dependencies() {
-  pushd_s "$src_path"
+  pushd "$src_path"
   build_zlib
   build_lame
   build_fdk_aac
-  build_opus
+  #build_opus
   build_x264
   build_vpx
-  build_aomav1
-  popd_s
+  #build_aomav1
+  popd
 }
 
 build_ffmpeg() {
   info "${FUNCNAME[O]}"
-  pushd_s "$src_path"
-  update_git_repo "https://github.com/FFmpeg/FFmpeg.git" ffmpeg
-  pushd_s ffmpeg
+  pushd "$src_path"
+  update_git_repo "https://github.com/FFmpeg/FFmpeg.git" ffmpeg n4.4
+  pushd ffmpeg
   if is_cross; then
     ffmpeg_config_opts+=(--target-os=mingw32)
-    ffmpeg_config_opts+=(--cross-prefix=$toolchain-)
+    ffmpeg_config_opts+=(--cross-prefix="$toolchain-")
     ffmpeg_config_opts+=(--enable-cross-compile)
     ffmpeg_config_opts+=(--pkg-config=pkg-config)
   fi
@@ -349,11 +335,12 @@ build_ffmpeg() {
   ffmpeg_config_opts+=(--enable-static)
   ffmpeg_config_opts+=(--enable-nonfree)
   ffmpeg_config_opts+=(--enable-gpl)
+  ffmpeg_config_opts+=(--extra-libs="-lm")
   update_configure "${ffmpeg_config_opts[@]}"
   make_install
-  popd_s
-  popd_s
-  infoc "${colour_green}" "Success."
+  popd
+  popd
+  info "Success."
   info "You can find the ffmpeg executable in ${prefix_path}/bin"
 }
 
@@ -361,19 +348,19 @@ parse_command_line() {
   for i in "$@"; do
     case $i in
         -d|--debug)
-        cl_debug=1
+        FLAG_debug=1
         shift
         ;;
         -h=*|--host=*)
-        cl_host="${i#*=}"
+        FLAG_host="${i#*=}"
         shift 
         ;;
         --target-os=*)
-        cl_target_os="${i#*=}"
+        FLAG_target_os="${i#*=}"
         shift # past argument=value
         ;;
         --toolchain=*)
-        cl_toolchain="${i#*=}"
+        FLAG_toolchain="${i#*=}"
         shift # past argument=value
         ;;
         --default)
@@ -388,32 +375,36 @@ parse_command_line() {
 }
 
 main() {
-  cl_debug=0
-  cl_host=
-  cl_target_os=
-  cl_toolchain=
+  FLAG_debug=0
+  FLAG_host=
+  FLAG_target_os=
+  FLAG_toolchain=
   parse_command_line $@
 
-  readonly debug=$cl_debug
+  readonly debug=$FLAG_debug
 
+  set -e
   if is_debug; then
-    set -ex
+    set -x
   fi
 
-  if [[ "$cl_target_os" = "mingw32" ]]; then
-    if [[ -z "$cl_toolchain" ]]; then
+  if [[ "$FLAG_target_os" = "mingw32" ]]; then
+    if [[ -z "$FLAG_toolchain" ]]; then
       readonly toolchain="x86_64-w64-mingw32"
     fi
-    if [[ -z "$cl_host" ]]; then
+    if [[ -z "$FLAG_host" ]]; then
       readonly host="x86_64-w64-mingw32"
+      readonly host_arg="--host=$host"
     fi
   fi
 
-  if [[ ! -z "$cl_toolchain" ]]; then
-    readonly toolchain="cl_toolchain"
+  if [[ ! -z "$FLAG_toolchain" ]]; then
+    readonly toolchain="FLAG_toolchain"
   fi
-  if [[ ! -z "$cl_host" ]]; then
-    readonly host="$cl_host"
+
+  if [[ ! -z "$FLAG_host" ]]; then
+    readonly host="$FLAG_host"
+    readonly host_arg="--host=$host"
   fi
   
   if [[ -z "$host" ]]; then
@@ -422,23 +413,15 @@ main() {
     readonly builddir="$host"
   fi
 
+  if is_cross; then
+    declare -r cmake_system_arg="-DCMAKE_SYSTEM_NAME=Windows"
+  fi
+
   readonly root_dir=$(pwd)
   mkdir -p $root_dir/_target/$builddir/prefix
   mkdir -p $root_dir/_target/$builddir/src
   readonly prefix_path="$(realpath $root_dir/_target/$builddir/prefix)"
   readonly src_path="$(realpath $root_dir/_target/$builddir/src)"
-  # printf -v text "%s" \
-  #   "CC=${toolchain}-gcc " \
-  #   "AR=${toolchain}-ar " \
-  #   "RANLIB=${toolchain}-ranlib " \
-  #   "LD=${toolchain}-ld " \
-  #   "STRIP=${toolchain}-strip " \
-  #   "CXX=${toolchain}-g++ " \
-  #   "CFLAGS=\"-I${prefix_path}/include\" " \
-  #   "CXXFLAGS=\"-I${prefix_path}/include\" " \
-  #   "LDFLAGS=\"-L${prefix_path}/lib\" " \
-  #   "PKG_CONFIG_PATH=\"${prefix_path}/lib/pkgconfig\""
-  # readonly toolchain_env="$text"
   set_cpu_count
   set_enviornment
   info "Configuration: "
