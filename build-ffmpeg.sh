@@ -24,7 +24,11 @@ die() {
 
 call() {
   info "$@"
-  $@ >> "$logfile" 2>&1
+  if is_debug; then
+    $@ | tee -a "$logfile"
+  else
+    $@ >> "$logfile" 2>&1
+  fi
 }
 
 required_parameters() {
@@ -45,7 +49,7 @@ update_svn_repo() {
   local -r repo_url="$1"
   local -r dest_dir="$2"
   local -r revision="$3"
-  required_parameters repo_url dest_dir
+  required_parameters repo_url dest_dir revision
 
   if [[ ! -z $revision ]]; then
     revision_string="-r $revision"
@@ -72,8 +76,8 @@ update_git_repo() {
   pushd "$src_path"
   local -r repo_url="$1"
   local -r dest_dir="$2"
-  local checkout_name="$3"
-  required_parameters repo_url dest_dir
+  local -r checkout_name="$3"
+  required_parameters repo_url dest_dir checkout_name
 
   if [ ! -d $dest_dir ]; then
     info "git clone from $repo_url to $dest_dir"
@@ -95,9 +99,6 @@ update_git_repo() {
   fi
 
   old_git_version=$(git rev-parse HEAD)
-  if [[ -z $checkout_name ]]; then
-    checkout_name="origin/master"
-  fi
   info "git checkout of $dest_dir:$checkout_name" 
   call git fetch --all
   call git checkout "$checkout_name" || (git_hard_reset && git checkout "$checkout_name") || (git reset --hard "$checkout_name") || exit 1
@@ -275,7 +276,7 @@ build_x264() {
 
 build_vpx() {
   info "${FUNCNAME[O]}"
-  update_git_repo https://chromium.googlesource.com/webm/libvpx.git vpx
+  update_git_repo https://chromium.googlesource.com/webm/libvpx.git vpx v1.11.0
   pushd vpx
   local vpx_host=
   if [[ $host == "x86_64-w64-mingw32" ]]; then
@@ -322,7 +323,7 @@ build_dependencies() {
 build_ffmpeg() {
   info "${FUNCNAME[O]}"
   pushd "$src_path"
-  update_git_repo "https://github.com/FFmpeg/FFmpeg.git" ffmpeg n4.4
+  update_git_repo "https://github.com/FFmpeg/FFmpeg.git" ffmpeg n5.0.1
   pushd ffmpeg
   if is_cross; then
     ffmpeg_config_opts+=(--target-os=mingw32)
