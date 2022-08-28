@@ -234,9 +234,16 @@ build_zlib() {
 
 build_lame() {
   info "${FUNCNAME[O]}"
-  update_svn_repo https://svn.code.sf.net/p/lame/svn/trunk/lame lame 6487
+  update_svn_repo https://svn.code.sf.net/p/lame/svn/trunk/lame lame 6507
   pushd lame
-  update_configure --prefix="$prefix_path" $host_arg --enable-nasm --disable-shared --disable-decoder
+  # DNCURSES_STATIC Due to https://github.com/msys2/MINGW-packages/issues/10312
+  CFLAGS="-DNCURSES_STATIC ${CFLAGS}" 
+    update_configure --prefix="${prefix_path}" \
+                     $host_arg                 \
+                     --enable-nasm             \
+                     --enable-static           \
+                     --disable-shared          \
+                     --disable-decoder
   make_install
   ffmpeg_config_opts+=(--enable-libmp3lame)
   popd 
@@ -244,7 +251,7 @@ build_lame() {
 
 build_fdk_aac() {
   info "${FUNCNAME[O]}"
-  update_git_repo https://github.com/mstorsjo/fdk-aac.git fdk-aac v2.0.1
+  update_git_repo https://github.com/mstorsjo/fdk-aac.git fdk-aac v2.0.2
   pushd fdk-aac
   update_autoreconf
   update_configure --prefix="$prefix_path" $host_arg --disable-shared
@@ -258,7 +265,12 @@ build_opus() {
   update_git_repo https://github.com/xiph/opus.git opus
   pushd opus
   update_autoreconf
-  update_configure --prefix="$prefix_path" $host_arg --disable-doc --disable-extra-programs --disable-stack-protector --disable-shared
+  update_configure --prefix="$prefix_path"    \
+                   $host_arg                  \
+                   --disable-doc              \
+                   --disable-extra-programs   \
+                   --disable-stack-protector  \
+                   --disable-shared
   make_install
   ffmpeg_config_opts+=(--enable-libopus)
   popd
@@ -276,22 +288,26 @@ build_x264() {
 
 build_vpx() {
   info "${FUNCNAME[O]}"
-  update_git_repo https://chromium.googlesource.com/webm/libvpx.git vpx v1.11.0
+  update_git_repo https://chromium.googlesource.com/webm/libvpx.git vpx v1.12.0
   pushd vpx
-  local vpx_host=
+  # vxp doesn't compile with mingw on native windows.
+  # If using msys, then install the vpx library and comment
+  # out everything but ffmpeg_config_opts+=(--enable-libvpx)
+  local target_arg=
   if [[ $host == "x86_64-w64-mingw32" ]]; then
-    vpx_host="x86_64-win64-gcc"
+    target_arg="--target=x86_64-win64-gcc"
   fi
-  update_configure \
-    --prefix="$prefix_path" \
-    --target=$vpx_host \
-    --enable-static \
-    --disable-shared \
-    --disable-examples \
-    --disable-tools \
-    --disable-docs \
-    --disable-unit-tests \
-    --enable-vp9-highbitdepth 
+  CFLAGS="-std=gnu99 ${CFLAGS}" \
+    update_configure \
+      --prefix="$prefix_path" \
+      ${target_arg} \
+      --enable-static \
+      --disable-shared \
+      --disable-examples \
+      --disable-tools \
+      --disable-docs \
+      --disable-unit-tests \
+      --enable-vp9-highbitdepth \
   make_install
   ffmpeg_config_opts+=(--enable-libvpx)
   popd
@@ -323,7 +339,7 @@ build_dependencies() {
 build_ffmpeg() {
   info "${FUNCNAME[O]}"
   pushd "$src_path"
-  update_git_repo "https://github.com/FFmpeg/FFmpeg.git" ffmpeg n5.0.1
+  update_git_repo "https://git.ffmpeg.org/ffmpeg.git" ffmpeg n5.1
   pushd ffmpeg
   if is_cross; then
     ffmpeg_config_opts+=(--target-os=mingw32)
@@ -337,6 +353,7 @@ build_ffmpeg() {
   ffmpeg_config_opts+=(--enable-nonfree)
   ffmpeg_config_opts+=(--enable-gpl)
   ffmpeg_config_opts+=(--extra-libs="-lm")
+  ffmpeg_config_opts+=(--extra-ldflags="-static")
   update_configure "${ffmpeg_config_opts[@]}"
   make_install
   popd
