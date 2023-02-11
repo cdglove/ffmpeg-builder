@@ -253,7 +253,7 @@ build_fdk_aac() {
   info "${FUNCNAME[O]}"
   update_git_repo https://github.com/mstorsjo/fdk-aac.git fdk-aac 3f864cc
   pushd fdk-aac
-  update_cmake "../fdk_aac_build" -G Ninja
+  update_cmake "../fdk_aac_build" -G Ninja -DBUILD_SHARED_LIBS=OFF
   pushd "../fdk_aac_build"
   ninja_install
   ffmpeg_config_opts+=(--enable-libfdk_aac)
