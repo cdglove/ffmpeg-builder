@@ -251,13 +251,14 @@ build_lame() {
 
 build_fdk_aac() {
   info "${FUNCNAME[O]}"
-  update_git_repo https://github.com/mstorsjo/fdk-aac.git fdk-aac v2.0.2
+  update_git_repo https://github.com/mstorsjo/fdk-aac.git fdk-aac 3f864cc
   pushd fdk-aac
-  update_autoreconf
-  update_configure --prefix="$prefix_path" $host_arg --disable-shared
-  make_install
+  update_cmake "../fdk_aac_build" -G Ninja
+  pushd "../fdk_aac_build"
+  ninja_install
   ffmpeg_config_opts+=(--enable-libfdk_aac)
   popd 
+  popd
 }
 
 build_opus() {
@@ -307,7 +308,7 @@ build_vpx() {
       --disable-tools \
       --disable-docs \
       --disable-unit-tests \
-      --enable-vp9-highbitdepth \
+      --enable-vp9-highbitdepth
   make_install
   ffmpeg_config_opts+=(--enable-libvpx)
   popd
