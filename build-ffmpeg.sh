@@ -5,7 +5,7 @@
 readonly colour_fg_norm="\033[39m"
 readonly colour_red="\033[39m"
 readonly colour_green="\033[32m"
-readonly logfile=$(realpath build-ffmpeg.log)
+readonly logfile=build-ffmpeg.log
 
 echo "" > $logfile
 log() {
